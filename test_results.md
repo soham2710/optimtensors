@@ -1,0 +1,56 @@
+
+## Section 3: Architectural Diversity Matrix Results
+
+| Architecture | Optimizer | Status |
+| :--- | :--- | :--- |
+| ResNet-18 | AdamW | PASS |
+| ResNet-18 | SGD | PASS |
+| MobileNetV3-small | Adam | PASS |
+| MobileNetV3-small | RMSprop | PASS |
+| SimpleConvNet | AdamW | PASS |
+| SimpleConvNet | SGD | PASS |
+| BERT-base-small | AdamW | PASS |
+| BERT-base-small | Adam | PASS |
+| GPT-2-small | AdamW | PASS |
+| GPT-2-small | RMSprop | PASS |
+| Vision-Transformer-small | AdamW | PASS |
+| Vision-Transformer-small | SGD | PASS |
+| LSTM | Adam | PASS |
+| LSTM | RMSprop | PASS |
+| GRU | AdamW | PASS |
+| GRU | SGD | PASS |
+| Embedding-Heavy-Dense | AdamW | PASS |
+| Embedding-Heavy-Dense | SGD | PASS |
+| Embedding-Heavy-Sparse | SGD | PASS |
+| nn.Linear(10,2) | AdamW | PASS |
+| nn.Linear(10,2) | SGD | PASS |
+| One-Parameter | Adam | PASS |
+| One-Parameter | SGD | PASS |
+
+## Section 3: Architectural Diversity Matrix Results
+
+| Architecture | Optimizer | Status |
+| :--- | :--- | :--- |
+| ResNet-18 | AdamW | PASS |
+| ResNet-18 | SGD | PASS |
+| MobileNetV3-small | Adam | PASS |
+| MobileNetV3-small | RMSprop | PASS |
+| SimpleConvNet | AdamW | PASS |
+| SimpleConvNet | SGD | PASS |
+| BERT-base-small | AdamW | PASS |
+| BERT-base-small | Adam | PASS |
+| GPT-2-small | AdamW | PASS |
+| GPT-2-small | RMSprop | PASS |
+| Vision-Transformer-small | AdamW | PASS |
+| Vision-Transformer-small | SGD | PASS |
+| LSTM | Adam | PASS |
+| LSTM | RMSprop | PASS |
+| GRU | AdamW | PASS |
+| GRU | SGD | PASS |
+| Embedding-Heavy-Dense | AdamW | PASS |
+| Embedding-Heavy-Dense | SGD | PASS |
+| Embedding-Heavy-Sparse | SGD | PASS |
+| nn.Linear(10,2) | AdamW | PASS |
+| nn.Linear(10,2) | SGD | PASS |
+| One-Parameter | Adam | PASS |
+| One-Parameter | SGD | PASS |
