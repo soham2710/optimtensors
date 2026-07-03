@@ -1,10 +1,14 @@
 # optimtensors 🚀
 
+[![Python Version](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/soham2710/optimtensors)
+[![PyTorch Version](https://img.shields.io/badge/pytorch-%3E%3D%201.10-orange.svg)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+
 `optimtensors` is a secure, high-performance, zero-code-execution serialization format and drop-in API for PyTorch optimizer checkpoints.
 
 This library closes the security hole left by PyTorch's default checkpointing pipeline. While model weights have largely transitioned to secure, pickle-free formats like Hugging Face's `safetensors`, optimizer state checkpoints—which `safetensors` explicitly scopes out due to metadata complexity—still rely on Python's highly vulnerable `pickle` serialization format (`torch.save` and `torch.load`), leaving training pipelines exposed to arbitrary code execution (see [CERT/CC Vulnerability Note VU#926636](https://kb.cert.org/vuls/id/926636)).
 
-`optimtensors` bridges this gap. It provides a secure format to save and load PyTorch optimizer states without code execution, while leveraging memory mapping (`mmap`) to achieve up to **120x+ speedups** and $O(1)$ physical RAM overhead.
+`optimtensors` bridges this gap. It provides a secure format to save and load PyTorch optimizer states without code execution, while leveraging memory mapping (`mmap`) to achieve up to **125x speedup** and $O(1)$ physical RAM overhead.
 
 ---
 
@@ -63,6 +67,11 @@ To make `optimtensors` production-ready and easily integrable into deep learning
 `optimtensors` is designed to be a drop-in replacement for PyTorch's native optimizer save/load calls.
 
 ### Installation
+
+#### Compatibility
+* **Python**: `>= 3.8`
+* **PyTorch**: `>= 1.10.0`
+* **safetensors**: `>= 0.4.0`
 
 ```bash
 pip install .
