@@ -9,9 +9,44 @@ description = "A safe, zero-code-execution serialization format for PyTorch opti
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
+authors = [
+    {name = "Soham Sharma", email = "sohamnsharma@gmail.com"},
+]
+keywords = [
+    "pytorch",
+    "optimizer",
+    "checkpoint",
+    "serialization",
+    "safetensors",
+    "security",
+    "pickle-free",
+    "mmap",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+    "Topic :: System :: Archiving",
+    "Typing :: Typed",
+]
 dependencies = [
     "torch>=2.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/soham2710/optimtensors"
+Repository = "https://github.com/soham2710/optimtensors"
+Changelog = "https://github.com/soham2710/optimtensors/blob/main/CHANGELOG.md"
+Issues = "https://github.com/soham2710/optimtensors/issues"
+Security = "https://github.com/soham2710/optimtensors/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 dev = [
