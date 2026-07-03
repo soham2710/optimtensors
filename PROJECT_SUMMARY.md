@@ -32,22 +32,28 @@ Across this work, we completed and verified the following 13 key areas:
 
 ### 1. Known Bug Resolutions (Regression Verification)
 * **Adam vs. AdamW Inference**: Fixed a bug where Adam and AdamW could not be distinguished because they share identical `param_groups` state keys. Implemented an explicit `optimizer_type` override as the source of truth, falling back to a documented warning for auto-inference.
+  * **Verification Test**: `test_adam_adamw_classification_regression` in [tests/test_serde.py](tests/test_serde.py#L298).
 * **Bounds Mismatch Exploits**: Implemented strict validation checks immediately before memory-mapping tensors: `assert (end - start) == numel * elem_size` (accounting for `bfloat16`/`int16` substitutions), raising a `ValueError` for malformed offsets.
+  * **Verification Test**: `test_offset_size_mismatch` in [tests/test_fuzz.py](tests/test_fuzz.py#L340).
 
 ### 2. Property-Based Testing (Hypothesis)
 * Configured Hypothesis to run **400 test cases** across all 10 PyTorch dtypes (including FP16, BF16, FP32, INTs, and Bool).
 * Handled edge shapes (empty tensors, large dimension sizes) and correctly implemented NaN masking (preventing standard assertion failures since `NaN != NaN`).
+  * **Verification Test**: Defined in [tests/test_hypothesis.py](tests/test_hypothesis.py).
 
 ### 3. Architecture Diversity Matrix
 * Tested optimizer state serialization/deserialization across **23 model-optimizer combinations** spanning 12 architectures (including ResNets, BERT, GPT-2, Vision Transformers, and architectures containing sparse embeddings/LSTMs). All round-trips completed successfully.
+  * **Verification Test**: Defined in [tests/test_architectures.py](tests/test_architectures.py).
 
 ### 4. Mixed-Precision & AMP Support
 * Validated mixed-precision training configurations where float16 and float32 tensors coexist in the same optimizer state.
 * Correctly re-interpreted `bfloat16` tensors using custom `int16` views to bypass safetensors' native limitation.
+  * **Verification Test**: `test_amp_fp16_fp32` and `test_amp_bf16_fp32_with_int16_collision` in [tests/test_amp.py](tests/test_amp.py).
 
 ### 5. Memory Footprint Benchmarking ($O(1)$ RAM)
 * Validated memory performance inside isolated Python subprocesses using Resident Set Size (RSS) checks via `/proc/self/status` to avoid process pre-allocation noise.
 * **Result**: Immediate load memory spikes were reduced to $O(1)$ virtual memory layout, mapping a 1.2GB checkpoint in **2 ms** while using only **0.79 MB** of physical RAM (vs. **81.30 MB** consumed by standard `torch.load` immediately).
+  * **Verification Test**: `test_memory_leaks` in [tests/test_leaks.py](tests/test_leaks.py).
 
 ### 6. Low-VRAM GPU Scale Benchmarking (BERT & GPT-2)
 * Executed scale tests fully on CUDA GPU. Optimized low-VRAM usage on the 4GB GPU (RTX 3050 Laptop) by moving original states to CPU and executing `torch.cuda.empty_cache()` before loading.
@@ -78,6 +84,6 @@ The clean repository includes:
 * `src/optimtensors/`: Core serialization logic (`serde.py`, `type_check.py`).
 * `tests/`: 48 unit, regression, benchmark, concurrency, and leak tests.
 * `pyproject.toml`: Distribution configuration.
-* `LICENSE`: MIT License.
+* `LICENSE`: MIT License or Apache-2.0 License.
 * `requirements.txt`: Minimal dependency specifications.
 * `huggingface_discussion_template.md` & `pytorch_ecosystem_application_template.md`: Drafted community templates for shipping.
