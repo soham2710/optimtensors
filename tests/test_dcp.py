@@ -3,6 +3,8 @@ import json
 import tempfile
 import torch
 import pytest
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from hypothesis import given, settings, strategies as st
 
 from optimtensors import SecureFileSystemWriter, SecureFileSystemReader
@@ -274,4 +276,73 @@ def test_secure_dcp_corrupted_json():
             dcp.load(load_state_dict, storage_reader=reader)
             
         assert "double quotes" in str(excinfo.value) or "JSON" in str(excinfo.value)
+
+# 5. Distributed Multiprocess Gloo Test (CPU Simulation)
+def _run_distributed_save_load(rank, world_size, temp_dir, sync_file):
+    # Initialize the process group with gloo backend on CPU
+    dist.init_process_group(
+        backend="gloo",
+        init_method=f"file://{sync_file}",
+        world_size=world_size,
+        rank=rank
+    )
+    
+    # Setup dummy rank-specific tensor data
+    my_state_dict = {
+        f"rank_tensor_{rank}": torch.ones(5, 5, dtype=torch.float32) * (rank + 1)
+    }
+    
+    # Save the checkpoint distributedly using our custom SecureFileSystemWriter
+    writer = SecureFileSystemWriter(temp_dir)
+    dcp.save(my_state_dict, storage_writer=writer)
+    
+    # Barrier synchronization
+    dist.barrier()
+    
+    # Load the checkpoint back into fresh tensors
+    load_state_dict = {
+        f"rank_tensor_{rank}": torch.empty(5, 5, dtype=torch.float32)
+    }
+    
+    reader = SecureFileSystemReader(temp_dir)
+    dcp.load(load_state_dict, storage_reader=reader)
+    
+    # Verify correctness
+    expected = torch.ones(5, 5, dtype=torch.float32) * (rank + 1)
+    assert torch.equal(load_state_dict[f"rank_tensor_{rank}"], expected), f"Rank {rank} loaded incorrect tensor values"
+    
+    # Clean up process group
+    dist.destroy_process_group()
+
+def test_secure_dcp_distributed_gloo():
+    # Setup temporary directories and synchronization files
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sync_fd, sync_file = tempfile.mkstemp()
+        os.close(sync_fd)
+        
+        world_size = 2
+        try:
+            mp.spawn(
+                _run_distributed_save_load,
+                args=(world_size, tmpdir, sync_file),
+                nprocs=world_size,
+                join=True
+            )
+            
+            # Verify metadata file is JSON and contains expected rank-specific info
+            metadata_json_path = os.path.join(tmpdir, "metadata.json")
+            assert os.path.exists(metadata_json_path), "metadata.json should be created by finish()"
+            
+            with open(metadata_json_path, "r") as f:
+                meta_content = json.load(f)
+                
+            # Verify metadata properties
+            assert "state_dict_metadata" in meta_content
+            # The metadata should contain keys for both rank tensors
+            assert "rank_tensor_0" in meta_content["state_dict_metadata"]
+            assert "rank_tensor_1" in meta_content["state_dict_metadata"]
+            
+        finally:
+            if os.path.exists(sync_file):
+                os.remove(sync_file)
 

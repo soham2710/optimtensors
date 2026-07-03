@@ -220,6 +220,14 @@ class SecureFileSystemWriter(FileSystemWriter):
         json_dict = metadata_to_json_dict(metadata)
         with self.fs.create_stream(tmp_path, "w") as metadata_file:
             json.dump(json_dict, metadata_file, indent=2)
+            if getattr(self, "sync_files", True):
+                metadata_file.flush()
+                try:
+                    fd = getattr(metadata_file, "fileno", None)
+                    if fd is not None:
+                        os.fsync(fd())
+                except (AttributeError, OSError):
+                    os.sync()
             
         dest_filename = (
             f"__{self.rank}_metadata.json"
@@ -241,8 +249,13 @@ class SecureFileSystemReader(FileSystemReader):
     def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
         rank = kwargs.get("rank")
         path = self._get_metadata_path(rank)
-        with self.fs.create_stream(path, "r") as metadata_file:
-            json_dict = json.load(metadata_file)
+        try:
+            with self.fs.create_stream(path, "r") as metadata_file:
+                json_dict = json.load(metadata_file)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to decode secure DCP metadata JSON file at '{path}': {e}"
+            ) from e
         metadata = json_dict_to_metadata(json_dict)
 
         if getattr(metadata, "storage_meta", None) is None:
