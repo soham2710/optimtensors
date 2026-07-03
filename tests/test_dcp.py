@@ -2,7 +2,7 @@ import os
 import tempfile
 import torch
 import pytest
-from optimtensors.serde import safe_save_optimizer, safe_load_into_optimizer
+from optimtensors.serde import safe_save_optimizer, safe_load_into_optimizer, safe_load_optimizer
 
 # Check if PyTorch Distributed Checkpoint (DCP) is available
 try:
@@ -51,20 +51,22 @@ def test_dcp_roundtrip():
         dcp.load(state_dict={"optimizer": fresh_state_dict}, storage_reader=reader)
         
         # Set states back to the fresh optimizer
-        set_optimizer_state_dict(fresh_model, fresh_optimizer, optim_state=fresh_state_dict)
+        set_optimizer_state_dict(fresh_model, fresh_optimizer, optim_state_dict=fresh_state_dict)
         
         # Validate that loaded state tensors match original
         loaded_state_dict = get_optimizer_state_dict(fresh_model, fresh_optimizer)
-        for key in original_state_dict:
-            orig_param_state = original_state_dict[key]
-            loaded_param_state = loaded_state_dict[key]
+        orig_state = original_state_dict["state"]
+        loaded_state = loaded_state_dict["state"]
+        for param_name in orig_state:
+            orig_param_state = orig_state[param_name]
+            loaded_param_state = loaded_state[param_name]
             for state_name in orig_param_state:
                 orig_val = orig_param_state[state_name]
                 loaded_val = loaded_param_state[state_name]
                 if isinstance(orig_val, torch.Tensor):
-                    assert torch.allclose(orig_val, loaded_val), f"Mismatch in {key}.{state_name}"
+                    assert torch.allclose(orig_val, loaded_val), f"Mismatch in {param_name}.{state_name}"
                 else:
-                    assert orig_val == loaded_val, f"Mismatch in {key}.{state_name}"
+                    assert orig_val == loaded_val, f"Mismatch in {param_name}.{state_name}"
                     
         print("--> SUCCESS: PyTorch Distributed Checkpoint (DCP) roundtrip completed with identical states!")
 
@@ -94,27 +96,26 @@ def test_optimtensors_with_dcp_state_dict():
         fresh_model = torch.nn.Linear(5, 5)
         fresh_optimizer = torch.optim.AdamW(fresh_model.parameters(), lr=1e-3)
         
-        # Construct template state dict structure first
-        fresh_state_dict = get_optimizer_state_dict(fresh_model, fresh_optimizer)
-        
-        # Load from safetensors file directly into the fresh state dict mapping in-place
-        safe_load_into_optimizer(fresh_state_dict, filepath)
+        # Load from safetensors file directly
+        loaded_fqn_dict = safe_load_optimizer(filepath)
         
         # Set states back to the fresh optimizer
-        set_optimizer_state_dict(fresh_model, fresh_optimizer, optim_state=fresh_state_dict)
+        set_optimizer_state_dict(fresh_model, fresh_optimizer, optim_state_dict=loaded_fqn_dict)
         
         # Validate that loaded state tensors match original
         loaded_state_dict = get_optimizer_state_dict(fresh_model, fresh_optimizer)
-        for key in fqn_state_dict:
-            orig_param_state = fqn_state_dict[key]
-            loaded_param_state = loaded_state_dict[key]
+        orig_state = fqn_state_dict["state"]
+        loaded_state = loaded_state_dict["state"]
+        for param_name in orig_state:
+            orig_param_state = orig_state[param_name]
+            loaded_param_state = loaded_state[param_name]
             for state_name in orig_param_state:
                 orig_val = orig_param_state[state_name]
                 loaded_val = loaded_param_state[state_name]
                 if isinstance(orig_val, torch.Tensor):
-                    assert torch.allclose(orig_val, loaded_val), f"Mismatch in {key}.{state_name}"
+                    assert torch.allclose(orig_val, loaded_val), f"Mismatch in {param_name}.{state_name}"
                 else:
-                    assert orig_val == loaded_val, f"Mismatch in {key}.{state_name}"
+                    assert orig_val == loaded_val, f"Mismatch in {param_name}.{state_name}"
                     
         print("--> SUCCESS: optimtensors serialized and loaded uniform FQN state dict successfully!")
 

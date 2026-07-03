@@ -113,9 +113,11 @@ def safe_save_optimizer(state_dict: dict, path: str, optimizer_type: str = None)
     __scalars__ = {}
     
     # Store parameter IDs and groups
+    state_keys = list(state_dict.get("state", {}).keys())
+    state_param_ids = [int(k) if isinstance(k, int) or (isinstance(k, str) and k.isdigit()) else k for k in state_keys]
     __config__ = {
         "param_groups": state_dict.get("param_groups", []),
-        "state_param_ids": [int(k) for k in state_dict.get("state", {}).keys()]
+        "state_param_ids": state_param_ids
     }
 
     # Extract tensors and scalars from 'state'
@@ -296,7 +298,8 @@ def safe_load_optimizer(path: str) -> dict:
             if len(parts) != 3 or parts[0] != "state":
                 raise ValueError(f"Malformed scalar key in header: {key_path}")
                 
-            param_id = int(parts[1])
+            param_id_str = parts[1]
+            param_id = int(param_id_str) if param_id_str.isdigit() else param_id_str
             state_key = parts[2]
             
             if scalar_entry["type"] == "tensor_list":
@@ -311,7 +314,8 @@ def safe_load_optimizer(path: str) -> dict:
             if len(parts) != 3 or parts[0] != "state":
                 raise ValueError(f"Malformed tensor key in header: {key_path}")
                 
-            param_id = int(parts[1])
+            param_id_str = parts[1]
+            param_id = int(param_id_str) if param_id_str.isdigit() else param_id_str
             state_key = parts[2]
             
             dtype_str = tensor_meta["dtype"]
