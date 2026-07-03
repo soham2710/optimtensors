@@ -121,3 +121,59 @@ To verify reliability, we ran this benchmark across two separate runs:
 ### 8d. Save-Path RSS Memory Leak Check
 - **Peak RSS Growth (cycle 10 to 100)**: **0 KB** (no memory growth).
 - *Finding*: Verified that intermediate CPU tensors (`t_cpu`) are correctly garbage collected and VRAM/RAM cache buffers are freed.
+
+## Section 3: Architectural Diversity Matrix Results
+
+| Architecture | Optimizer | Status |
+| :--- | :--- | :--- |
+| ResNet-18 | AdamW | SKIPPED |
+| ResNet-18 | SGD | SKIPPED |
+| MobileNetV3-small | Adam | SKIPPED |
+| MobileNetV3-small | RMSprop | SKIPPED |
+| SimpleConvNet | AdamW | PASS |
+| SimpleConvNet | SGD | PASS |
+| BERT-base-small | AdamW | PASS |
+| BERT-base-small | Adam | PASS |
+| GPT-2-small | AdamW | PASS |
+| GPT-2-small | RMSprop | PASS |
+| Vision-Transformer-small | AdamW | PASS |
+| Vision-Transformer-small | SGD | PASS |
+| LSTM | Adam | PASS |
+| LSTM | RMSprop | PASS |
+| GRU | AdamW | PASS |
+| GRU | SGD | PASS |
+| Embedding-Heavy-Dense | AdamW | PASS |
+| Embedding-Heavy-Dense | SGD | PASS |
+| Embedding-Heavy-Sparse | SGD | PASS |
+| nn.Linear(10,2) | AdamW | PASS |
+| nn.Linear(10,2) | SGD | PASS |
+| One-Parameter | Adam | PASS |
+| One-Parameter | SGD | PASS |
+
+## Section 3: Architectural Diversity Matrix Results
+
+| Architecture | Optimizer | Status |
+| :--- | :--- | :--- |
+| ResNet-18 | AdamW | SKIPPED |
+| ResNet-18 | SGD | SKIPPED |
+| MobileNetV3-small | Adam | SKIPPED |
+| MobileNetV3-small | RMSprop | SKIPPED |
+| SimpleConvNet | AdamW | PASS |
+| SimpleConvNet | SGD | PASS |
+| BERT-base-small | AdamW | PASS |
+| BERT-base-small | Adam | PASS |
+| GPT-2-small | AdamW | PASS |
+| GPT-2-small | RMSprop | PASS |
+| Vision-Transformer-small | AdamW | PASS |
+| Vision-Transformer-small | SGD | PASS |
+| LSTM | Adam | PASS |
+| LSTM | RMSprop | PASS |
+| GRU | AdamW | PASS |
+| GRU | SGD | PASS |
+| Embedding-Heavy-Dense | AdamW | PASS |
+| Embedding-Heavy-Dense | SGD | PASS |
+| Embedding-Heavy-Sparse | SGD | PASS |
+| nn.Linear(10,2) | AdamW | PASS |
+| nn.Linear(10,2) | SGD | PASS |
+| One-Parameter | Adam | PASS |
+| One-Parameter | SGD | PASS |

@@ -389,7 +389,7 @@ def test_adversarial_shape_offset_fuzz():
         {"shape": [2], "data_offsets": [0, 4], "msg": "does not match expected tensor size"},
         {"shape": [4], "data_offsets": [0, 8], "msg": "does not match expected tensor size"},
         {"shape": [0, 5], "data_offsets": [0, 8], "msg": "does not match expected tensor size"},
-        {"shape": [-1, 2], "data_offsets": [0, 8], "msg": "negative dimensions|does not match expected|failed to reshape"},
+        {"shape": [-1, 2], "data_offsets": [0, 8], "msg": "invalid tensor shape|negative dimensions|does not match expected|failed to reshape"},
     ]
     
     for case in cases:

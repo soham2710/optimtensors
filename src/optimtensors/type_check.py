@@ -3,6 +3,9 @@ def check_safe_structure(val, path=""):
     Recursively validates that the structure only contains allowed safe primitive types:
     int, float, bool, str, None, and lists/tuples/dicts of these.
     Raises TypeError if any unsupported type is encountered.
+
+    Note: integer dict keys are accepted, but JSON serialization coerces them
+    to strings, so they round-trip through the file format as strings.
     """
     if isinstance(val, bool):
         return

@@ -80,6 +80,15 @@ def _rekey_state_to_indices(state_dict: dict) -> tuple[dict, dict[int, str]]:
     str_keys = [k for k in state.keys() if isinstance(k, str)]
     if not str_keys:
         return state_dict, {}
+    if len(str_keys) != len(state):
+        # Mixed keys are ambiguous: remapping all keys to indices would leave
+        # integer entries in param_groups["params"] pointing at the wrong
+        # state, and integer originals cannot round-trip through the sidecar.
+        raise ValueError(
+            "Optimizer state mixes string (FQN) and integer parameter keys; "
+            "cannot re-key deterministically. Use a state dict keyed entirely "
+            "by FQNs or entirely by integer indices."
+        )
 
     fqns = sorted(state.keys(), key=str)
     fqn_to_idx = {fqn: i for i, fqn in enumerate(fqns)}

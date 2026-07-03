@@ -1,7 +1,7 @@
 # optimtensors 🚀
 
 [![Python Version](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/soham2710/optimtensors)
-[![PyTorch Version](https://img.shields.io/badge/pytorch-%3E%3D%201.10-orange.svg)](https://pytorch.org/)
+[![PyTorch Version](https://img.shields.io/badge/pytorch-%3E%3D%202.0-orange.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
 `optimtensors` is a secure, high-performance, zero-code-execution serialization format and drop-in API for PyTorch optimizer checkpoints.
@@ -70,8 +70,7 @@ To make `optimtensors` production-ready and easily integrable into deep learning
 
 #### Compatibility
 * **Python**: `>= 3.8`
-* **PyTorch**: `>= 1.10.0`
-* **safetensors**: `>= 0.4.0`
+* **PyTorch**: `>= 2.0.0`
 
 ```bash
 pip install .
