@@ -155,6 +155,64 @@ This mathematically confirms that the exact momentum values, gradient moments, a
 
 ---
 
+## 🚀 Hugging Face Transformers Integration
+
+Secure your Hugging Face `Trainer` loops from pickle vulnerability with zero changes to your training logic.
+
+### Installation
+```bash
+pip install optimtensors[transformers]
+```
+
+### Usage
+
+1. **Callback (Save Side)**:
+   Add `OptimTensorsCallback` to your trainer callbacks:
+   ```python
+   from optimtensors import OptimTensorsCallback
+
+   trainer = Trainer(
+       model=model,
+       args=training_args,
+       train_dataset=dataset,
+       # mode="dual" writes both, "strict" deletes optimizer.pt
+       callbacks=[OptimTensorsCallback(mode="strict")]
+   )
+   ```
+
+2. **Mixin (Load Side)**:
+   Subclass your Trainer with `OptimTensorsTrainerMixin` to support pickle-free resumes:
+   ```python
+   from transformers import Trainer
+   from optimtensors import OptimTensorsTrainerMixin
+
+   class SafeTrainer(OptimTensorsTrainerMixin, Trainer):
+       pass
+
+   trainer = SafeTrainer(
+       model=model,
+       args=training_args,
+       train_dataset=dataset,
+       # ...
+   )
+   # Resumes seamlessly from .optimtensors
+   trainer.train(resume_from_checkpoint="path/to/checkpoint")
+   ```
+
+3. **Manual Load Helper**:
+   For custom workflows, load state dictionaries directly:
+   ```python
+   from optimtensors import load_trainer_optimizer
+   
+   load_trainer_optimizer("path/to/checkpoint", trainer.optimizer, device=args.device)
+   ```
+
+### v1.0 Out-of-Scope Design Focus
+- **Scheduler & RNG States**: Currently, `scheduler.pt` and `rng_state.pth` remain pickled. Moving these to safe format is targeted for v1.1.
+- **DeepSpeed / FSDP**: Sharded optimizer checkpoints in distributed systems are skipped by the callback and mixin, as they are handled natively by PyTorch Distributed Checkpoint (DCP).
+
+---
+
 ## 🔍 Validation Suite
 
 * **Property-Based Testing**: Successfully passed **400 randomized test cases** using the `hypothesis` library across all 10 PyTorch dtypes, handling edge shapes (empty/scalar/4-D tensors) and NaN masking.
