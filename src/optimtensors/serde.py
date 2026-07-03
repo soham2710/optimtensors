@@ -2,6 +2,7 @@ import json
 import mmap
 import os
 import struct
+import tempfile
 import torch
 from optimtensors.type_check import validate_optimizer_state_dict, check_safe_structure
 
@@ -113,9 +114,11 @@ def safe_save_optimizer(state_dict: dict, path: str, optimizer_type: str = None)
     __scalars__ = {}
     
     # Store parameter IDs and groups
+    state_keys = list(state_dict.get("state", {}).keys())
+    state_param_ids = [int(k) if isinstance(k, int) or (isinstance(k, str) and k.isdigit()) else k for k in state_keys]
     __config__ = {
         "param_groups": state_dict.get("param_groups", []),
-        "state_param_ids": [int(k) for k in state_dict.get("state", {}).keys()]
+        "state_param_ids": state_param_ids
     }
 
     # Extract tensors and scalars from 'state'
@@ -193,29 +196,42 @@ def safe_save_optimizer(state_dict: dict, path: str, optimizer_type: str = None)
     header_bytes += b' ' * padding_len
     header_len = len(header_bytes)
 
-    # 5. Write everything to disk
+    # 5. Write everything to disk atomically (temp file + rename), so an
+    # interrupted save never leaves a truncated/corrupt checkpoint at `path`.
     # Ensure any parent directories exist
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    
-    with open(path, "wb") as f:
-        f.write(struct.pack("<Q", header_len))
-        f.write(header_bytes)
-        
-        import ctypes
-        for key_path, tensor in tensors_to_write:
-            t_cpu = tensor.detach().cpu().contiguous()
-            numel = t_cpu.numel()
-            elem_size = t_cpu.element_size()
-            total_bytes = numel * elem_size
-            padding_len = (8 - (total_bytes % 8)) % 8
-            
-            if total_bytes > 0:
-                address = t_cpu.untyped_storage().data_ptr()
-                buffer = (ctypes.c_char * total_bytes).from_address(address)
-                f.write(buffer)
-                
-            if padding_len > 0:
-                f.write(b'\x00' * padding_len)
+    target_dir = os.path.dirname(os.path.abspath(path))
+    os.makedirs(target_dir, exist_ok=True)
+
+    temp_fd, temp_path = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
+    try:
+        with os.fdopen(temp_fd, "wb") as f:
+            f.write(struct.pack("<Q", header_len))
+            f.write(header_bytes)
+
+            import ctypes
+            for key_path, tensor in tensors_to_write:
+                t_cpu = tensor.detach().cpu().contiguous()
+                numel = t_cpu.numel()
+                elem_size = t_cpu.element_size()
+                total_bytes = numel * elem_size
+                padding_len = (8 - (total_bytes % 8)) % 8
+
+                if total_bytes > 0:
+                    # data_ptr() points at the tensor's first element (it accounts
+                    # for storage_offset); untyped_storage().data_ptr() would point
+                    # at the start of the underlying storage and serialize the
+                    # wrong bytes for contiguous views like x[1:].
+                    address = t_cpu.data_ptr()
+                    buffer = (ctypes.c_char * total_bytes).from_address(address)
+                    f.write(buffer)
+
+                if padding_len > 0:
+                    f.write(b'\x00' * padding_len)
+        os.replace(temp_path, path)
+    except BaseException:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
 
 
 def safe_load_optimizer(path: str) -> dict:
@@ -253,9 +269,13 @@ def safe_load_optimizer(path: str) -> dict:
             raise ValueError(f"Failed to parse JSON header: {e}")
             
         # Verify required keys
+        if not isinstance(header, dict):
+            raise ValueError("Invalid file: JSON header must be an object")
         for key in ["__metadata__", "__tensors__", "__scalars__", "__config__"]:
             if key not in header:
                 raise ValueError(f"Missing required top-level key: {key}")
+            if not isinstance(header[key], dict):
+                raise ValueError(f"Top-level key {key} must be a JSON object")
                 
         # Check for unexpected top-level keys to prevent any hidden slots
         allowed_keys = {"__metadata__", "__tensors__", "__scalars__", "__config__"}
@@ -295,14 +315,54 @@ def safe_load_optimizer(path: str) -> dict:
             parts = key_path.split(".", 2)
             if len(parts) != 3 or parts[0] != "state":
                 raise ValueError(f"Malformed scalar key in header: {key_path}")
-                
-            param_id = int(parts[1])
+
+            param_id_str = parts[1]
+            param_id = int(param_id_str) if param_id_str.isdigit() else param_id_str
             state_key = parts[2]
-            
+
+            if not isinstance(scalar_entry, dict) or "type" not in scalar_entry or "value" not in scalar_entry:
+                raise ValueError(f"Malformed scalar entry for key {key_path}: expected dict with 'type' and 'value'")
+
+            if param_id not in state:
+                raise ValueError(f"Scalar key {key_path} refers to unknown parameter id {param_id}")
+
             if scalar_entry["type"] == "tensor_list":
-                state[param_id][state_key] = [None] * scalar_entry["value"]
+                list_len = scalar_entry["value"]
+                if not isinstance(list_len, int) or isinstance(list_len, bool) or list_len < 0:
+                    raise ValueError(f"Invalid tensor_list length for key {key_path}: {list_len!r}")
+                # Placeholder slots can only be filled by tensors declared in the
+                # header, so a length beyond that is malformed (and a memory-DoS vector).
+                if list_len > len(__tensors__):
+                    raise ValueError(
+                        f"tensor_list length {list_len} for key {key_path} exceeds "
+                        f"number of tensors in header ({len(__tensors__)})"
+                    )
+                state[param_id][state_key] = [None] * list_len
             else:
                 state[param_id][state_key] = scalar_entry["value"]
+
+        # Reject overlapping data_offsets: every tensor must map a disjoint
+        # region of the buffer (gaps for alignment padding are fine).
+        occupied = []
+        for key_path, tensor_meta in __tensors__.items():
+            if not isinstance(tensor_meta, dict) or not all(
+                k in tensor_meta for k in ("dtype", "shape", "data_offsets")
+            ):
+                raise ValueError(f"Malformed tensor entry for key {key_path}")
+            offsets = tensor_meta["data_offsets"]
+            if (
+                not isinstance(offsets, list) or len(offsets) != 2
+                or not all(isinstance(o, int) and not isinstance(o, bool) for o in offsets)
+            ):
+                raise ValueError(f"Malformed data_offsets for key {key_path}: {offsets!r}")
+            if offsets[0] < offsets[1]:  # zero-size regions cannot overlap
+                occupied.append((offsets[0], offsets[1], key_path))
+        occupied.sort()
+        for i in range(1, len(occupied)):
+            if occupied[i][0] < occupied[i - 1][1]:
+                raise ValueError(
+                    f"Overlapping tensor data_offsets: {occupied[i - 1][2]} and {occupied[i][2]}"
+                )
 
         # Reconstruct tensors
         for key_path, tensor_meta in __tensors__.items():
@@ -310,23 +370,31 @@ def safe_load_optimizer(path: str) -> dict:
             parts = key_path.split(".", 2)
             if len(parts) != 3 or parts[0] != "state":
                 raise ValueError(f"Malformed tensor key in header: {key_path}")
-                
-            param_id = int(parts[1])
+
+            param_id_str = parts[1]
+            param_id = int(param_id_str) if param_id_str.isdigit() else param_id_str
             state_key = parts[2]
-            
+
+            if param_id not in state:
+                raise ValueError(f"Tensor key {key_path} refers to unknown parameter id {param_id}")
+
             dtype_str = tensor_meta["dtype"]
             shape = tensor_meta["shape"]
             start, end = tensor_meta["data_offsets"]
-            
+
             torch_dtype = SAFETA_TO_TORCH.get(dtype_str)
             if torch_dtype is None:
                 raise ValueError(f"Unsupported dtype in header: {dtype_str}")
-                
+
+            if not isinstance(shape, list) or not all(
+                isinstance(dim, int) and not isinstance(dim, bool) and dim >= 0 for dim in shape
+            ):
+                raise ValueError(f"Invalid tensor shape {shape!r} for key {key_path}")
+
             # Slice from mmap using absolute offset in file
             if start < 0 or end < start or start_offset + end > file_size:
                 raise ValueError(f"Invalid tensor offsets [{start}, {end}] for key {key_path}")
             abs_start = start_offset + start
-            abs_end = start_offset + end
             numel = 1
             for dim in shape:
                 numel *= dim
@@ -361,10 +429,16 @@ def safe_load_optimizer(path: str) -> dict:
                 base_key, index_str = state_key.rsplit(".", 1)
                 if index_str.isdigit():
                     idx = int(index_str)
-                    # Check that placeholder exists
-                    if base_key not in state[param_id] or state[param_id][base_key] is None:
+                    # Check that a list placeholder of sufficient length exists
+                    placeholder = state[param_id].get(base_key)
+                    if not isinstance(placeholder, list):
                         raise ValueError(f"Missing tensor list placeholder for {base_key}")
-                    state[param_id][base_key][idx] = tensor
+                    if idx >= len(placeholder):
+                        raise ValueError(
+                            f"Tensor list index {idx} out of range for {base_key} "
+                            f"(declared length {len(placeholder)})"
+                        )
+                    placeholder[idx] = tensor
                 else:
                     state[param_id][state_key] = tensor
             else:
@@ -408,7 +482,14 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
         
     # Validate each parameter state in loaded_state
     for param_id_str, param_state in loaded_state.items():
-        param_id = int(param_id_str)
+        try:
+            param_id = int(param_id_str)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Checkpoint state key {param_id_str!r} is not an integer parameter index. "
+                f"FQN-keyed checkpoints (e.g. from FSDP) must be loaded via "
+                f"optimtensors.distributed.load_optimizer_state_dict instead."
+            )
         if param_id < 0 or param_id >= len(all_params):
             raise ValueError(
                 f"Checkpoint state refers to parameter index {param_id}, "
@@ -443,6 +524,8 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
                 # If state is not initialized yet in optimizer, check if it's a tensor.
                 # If it's a tensor of size > 1, we expect it to match parameter shape p.shape.
                 if isinstance(val, torch.Tensor):
+                    if val.dim() == 0:
+                        continue
                     if val.shape != p.shape:
                         if val.numel() > 1 or p.numel() == 1:
                             raise ValueError(
@@ -453,6 +536,8 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
                     # For list/tuple of tensors (e.g. LBFGS state history), check elements
                     for idx, item in enumerate(val):
                         if isinstance(item, torch.Tensor):
+                            if item.dim() == 0:
+                                continue
                             if item.shape != p.shape:
                                 if item.numel() > 1 or p.numel() == 1:
                                     raise ValueError(

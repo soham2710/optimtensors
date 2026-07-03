@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 from typing import Any, cast
@@ -21,6 +23,28 @@ from torch.distributed.checkpoint.filesystem import (
 )
 from torch.distributed.checkpoint.storage import WriteResult
 
+# Closed sets of allowed dtypes/layouts, mirroring the closed-type discipline
+# of the main serde format. Never resolve these via getattr(torch, ...) on
+# strings from the metadata file.
+_ALLOWED_DTYPES = {
+    "torch.float32": torch.float32,
+    "torch.float16": torch.float16,
+    "torch.bfloat16": torch.bfloat16,
+    "torch.float64": torch.float64,
+    "torch.int64": torch.int64,
+    "torch.int32": torch.int32,
+    "torch.int16": torch.int16,
+    "torch.int8": torch.int8,
+    "torch.uint8": torch.uint8,
+    "torch.bool": torch.bool,
+}
+
+_ALLOWED_LAYOUTS = {
+    "torch.strided": torch.strided,
+    "torch.sparse_coo": torch.sparse_coo,
+}
+
+
 def _tensor_properties_to_dict(props: TensorProperties) -> dict:
     return {
         "dtype": str(props.dtype),
@@ -32,16 +56,14 @@ def _tensor_properties_to_dict(props: TensorProperties) -> dict:
 
 def _dict_to_tensor_properties(d: dict) -> TensorProperties:
     dtype_str = d.get("dtype", "torch.float32")
-    if dtype_str.startswith("torch."):
-        dtype = getattr(torch, dtype_str.split(".")[1])
-    else:
-        dtype = torch.float32
-        
+    dtype = _ALLOWED_DTYPES.get(dtype_str)
+    if dtype is None:
+        raise ValueError(f"Unsupported dtype in DCP metadata: {dtype_str!r}")
+
     layout_str = d.get("layout", "torch.strided")
-    if layout_str.startswith("torch."):
-        layout = getattr(torch, layout_str.split(".")[1])
-    else:
-        layout = torch.strided
+    layout = _ALLOWED_LAYOUTS.get(layout_str)
+    if layout is None:
+        raise ValueError(f"Unsupported layout in DCP metadata: {layout_str!r}")
 
     mem_format_str = d.get("memory_format", "torch.contiguous_format")
     if "contiguous_format" in mem_format_str:
@@ -196,6 +218,13 @@ class SecureFileSystemWriter(FileSystemWriter):
     """
     Subclass of FileSystemWriter that serializes the checkpoint metadata
     in a secure, human-readable JSON format instead of standard Python pickle.
+
+    Known limitation (v1): this removes pickle from the ``.metadata`` file
+    only. PyTorch's FileSystemWriter still serializes non-tensor items
+    (BYTE_IO write items, e.g. ``param_groups``) inside the ``.distcp`` data
+    files via ``torch.save``, and FileSystemReader deserializes them with
+    ``torch.load`` (``weights_only`` depends on your torch version). The
+    pickle attack surface is reduced, not eliminated — see README.
     """
     def _get_metadata_path(self, rank: int | None = None) -> os.PathLike:
         filename = "metadata.json" if rank is None else f"__{rank}_metadata.json"
@@ -241,6 +270,9 @@ class SecureFileSystemReader(FileSystemReader):
     """
     Subclass of FileSystemReader that deserializes the checkpoint metadata
     from a secure, human-readable JSON format instead of standard Python pickle.
+
+    See SecureFileSystemWriter for the v1 limitation: BYTE_IO items inside
+    ``.distcp`` data files still go through ``torch.load``.
     """
     def _get_metadata_path(self, rank: int | None = None) -> os.PathLike:
         filename = "metadata.json" if rank is None else f"__{rank}_metadata.json"

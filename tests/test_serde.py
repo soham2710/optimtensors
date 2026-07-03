@@ -335,3 +335,50 @@ def test_adam_adamw_classification_regression():
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+def test_0dim_tensor_single_element_parameter_validation():
+    """Verify that uninitialized loaders correctly bypass shape validation for 0-dim tensors on numel==1 parameters."""
+    class SingleElementModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            # Bias has shape [1] (numel == 1)
+            self.linear = nn.Linear(1, 1, bias=True)
+            
+        def forward(self, x):
+            return self.linear(x)
+            
+    model = SingleElementModel()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    
+    # Train 1 step to populate optimizer state (including 0-dim 'step' tensor)
+    x = torch.randn(2, 1)
+    loss = model(x).sum()
+    loss.backward()
+    optimizer.step()
+    
+    with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as tmp:
+        tmp_path = tmp.name
+        
+    try:
+        safe_save_optimizer(optimizer.state_dict(), tmp_path, optimizer_type="AdamW")
+        
+        # Create a fresh optimizer (no state initialized)
+        fresh_model = SingleElementModel()
+        fresh_optimizer = torch.optim.AdamW(fresh_model.parameters(), lr=0.001)
+        
+        # Load state; should not raise ValueError on shape check of 0-dim 'step' tensor
+        safe_load_into_optimizer(fresh_optimizer, tmp_path)
+        
+        # Verify state was correctly loaded
+        fresh_state = fresh_optimizer.state_dict()["state"]
+        for p_id, state in fresh_state.items():
+            assert "step" in state
+            # Step tensor should be 0-dimensional
+            assert state["step"].dim() == 0
+            assert int(state["step"]) == 1
+            
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
