@@ -47,6 +47,17 @@ The JSON header contains four top-level keys:
 
 ---
 
+## 📦 Why is it Structured as a Package?
+
+To make `optimtensors` production-ready and easily integrable into deep learning frameworks (like Hugging Face Transformers, PyTorch Lightning, or custom training loops), it is structured as a standard, installable Python package:
+
+1. **Drop-in Integration**: Packaging allows you to install `optimtensors` once in your environment (via `pip install .` or from PyPI) and import it globally (`from optimtensors import safe_save_optimizer`) without copy-pasting code or maintaining nested directories in your codebase.
+2. **Encapsulated Dependency Management**: All required versions for core libraries (such as `torch` and `safetensors`) and testing packages are declared inside `pyproject.toml`, resolving dependencies automatically at install time.
+3. **Decoupled Architecture**: Keeps optimization/serialization utilities separate from your training scripts and model definitions, ensuring modularity and clean, reproducible builds in continuous integration (CI/CD) pipelines.
+4. **Namespace Isolation**: Protects internal modules (like boundary checkers, type validation, and direct buffer memory mappers) from colliding with names in your training scripts.
+
+---
+
 ## 💻 Usage
 
 `optimtensors` is designed to be a drop-in replacement for PyTorch's native optimizer save/load calls.
