@@ -81,9 +81,8 @@ Across this work, we completed and verified the following 13 key areas:
 ## 📦 Delivered Files in Clean Repository (`optimtensors/`)
 
 The clean repository includes:
-* `src/optimtensors/`: Core serialization logic (`serde.py`, `type_check.py`).
-* `tests/`: 48 unit, regression, benchmark, concurrency, and leak tests.
+* `src/optimtensors/`: Core serialization logic (`serde.py`, `type_check.py`) and PyTorch Distributed Checkpoint (DCP) integration (`dcp.py`).
+* `tests/`: 49 unit, regression, benchmark, concurrency, leak, and distributed checkpoint tests.
 * `pyproject.toml`: Distribution configuration.
-* `LICENSE`: MIT License or Apache-2.0 License.
+* `LICENSE`: Apache-2.0 License.
 * `requirements.txt`: Minimal dependency specifications.
-* `huggingface_discussion_template.md` & `pytorch_ecosystem_application_template.md`: Drafted community templates for shipping.
