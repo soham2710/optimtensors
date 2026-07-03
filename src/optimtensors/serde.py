@@ -447,6 +447,8 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
                 # If state is not initialized yet in optimizer, check if it's a tensor.
                 # If it's a tensor of size > 1, we expect it to match parameter shape p.shape.
                 if isinstance(val, torch.Tensor):
+                    if val.dim() == 0:
+                        continue
                     if val.shape != p.shape:
                         if val.numel() > 1 or p.numel() == 1:
                             raise ValueError(
@@ -457,6 +459,8 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
                     # For list/tuple of tensors (e.g. LBFGS state history), check elements
                     for idx, item in enumerate(val):
                         if isinstance(item, torch.Tensor):
+                            if item.dim() == 0:
+                                continue
                             if item.shape != p.shape:
                                 if item.numel() > 1 or p.numel() == 1:
                                     raise ValueError(
