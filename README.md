@@ -100,7 +100,33 @@ from optimtensors import safe_load_optimizer
 optimizer.load_state_dict(safe_load_optimizer("checkpoint.safetensors"))
 ```
 
-### 3. Loading and Validating (Recommended)
+### 3. General Training State Serialization (v1.1.0+)
+
+For saving and loading arbitrary training state dictionaries (including learning rate schedulers, custom variables, and random number generator states) securely:
+
+```python
+from optimtensors import safe_save_state, safe_load_state
+import torch
+import numpy as np
+import random
+
+# Compile a composite training state dictionary
+state_dict = {
+    "scheduler": scheduler.state_dict(),
+    "step": 42,
+    "torch_rng": torch.get_rng_state(),
+    "python_rng": random.getstate(),
+    "numpy_rng": np.random.get_state(),
+}
+
+# Save securely (preserves tuples, integer dictionary keys, and handles NumPy ndarrays/scalars)
+safe_save_state(state_dict, "training_state.optimtensors")
+
+# Load securely back to identical Python types
+loaded_state = safe_load_state("training_state.optimtensors")
+```
+
+### 4. Loading and Validating (Recommended)
 
 To load and validate that the checkpoint's tensor shapes, types, and counts match your optimizer instance (preventing silent bugs or shape mismatches):
 

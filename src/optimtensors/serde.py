@@ -45,6 +45,13 @@ DTYPE_SIZES = {
     torch.bool: 1,
 }
 
+NUMPY_SUPPORTED_DTYPES = {
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+    "float16", "float32", "float64",
+    "bool"
+}
+
 
 def get_scalar_type_name(val):
     if isinstance(val, bool):
@@ -104,139 +111,16 @@ def safe_save_optimizer(state_dict: dict, path: str, optimizer_type: str = None)
     if optimizer_type is None:
         optimizer_type = infer_optimizer_type(state_dict)
 
-    # 2. Deconstruct state_dict
-    __metadata__ = {
-        "format_version": "1.0",
+    metadata = {
         "optimizer_type": optimizer_type,
+        "format_type": "optimizer_state"
     }
-    
-    __tensors__ = {}
-    __scalars__ = {}
-    
-    # Store parameter IDs and groups
-    state_keys = list(state_dict.get("state", {}).keys())
-    state_param_ids = [int(k) if isinstance(k, int) or (isinstance(k, str) and k.isdigit()) else k for k in state_keys]
-    __config__ = {
-        "param_groups": state_dict.get("param_groups", []),
-        "state_param_ids": state_param_ids
-    }
-
-    # Extract tensors and scalars from 'state'
-    tensors_to_write = []
-    current_offset = 0
-
-    state = state_dict.get("state", {})
-    for param_id, param_state in state.items():
-        param_id_str = str(param_id)
-        for k, v in param_state.items():
-            key_path = f"state.{param_id_str}.{k}"
-            if isinstance(v, torch.Tensor):
-                tensors_to_write.append((key_path, v))
-                numel = v.numel()
-                elem_size = v.element_size()
-                total_bytes = numel * elem_size
-                padding_len = (8 - (total_bytes % 8)) % 8
-                
-                dtype_str = TORCH_TO_SAFETA.get(v.dtype)
-                if dtype_str is None:
-                    raise TypeError(f"Unsupported tensor dtype: {v.dtype} at {key_path}")
-                    
-                __tensors__[key_path] = {
-                    "dtype": dtype_str,
-                    "shape": list(v.shape),
-                    "data_offsets": [current_offset, current_offset + total_bytes]
-                }
-                current_offset += total_bytes + padding_len
-                
-            elif isinstance(v, (list, tuple)) and len(v) > 0 and any(isinstance(x, torch.Tensor) for x in v) and all(isinstance(x, (torch.Tensor, type(None))) for x in v):
-                # Save as list of tensors (e.g. LBFGS state history)
-                __scalars__[key_path] = {
-                    "type": "tensor_list",
-                    "value": len(v)
-                }
-                for idx, t in enumerate(v):
-                    if t is not None:
-                        sub_key = f"{key_path}.{idx}"
-                        tensors_to_write.append((sub_key, t))
-                        numel = t.numel()
-                        elem_size = t.element_size()
-                        total_bytes = numel * elem_size
-                        padding_len = (8 - (total_bytes % 8)) % 8
-                        
-                        dtype_str = TORCH_TO_SAFETA.get(t.dtype)
-                        if dtype_str is None:
-                            raise TypeError(f"Unsupported tensor dtype: {t.dtype} at {sub_key}")
-                            
-                        __tensors__[sub_key] = {
-                            "dtype": dtype_str,
-                            "shape": list(t.shape),
-                            "data_offsets": [current_offset, current_offset + total_bytes]
-                        }
-                        current_offset += total_bytes + padding_len
-            else:
-                # Store scalar with its type and value (tuples converted to list)
-                val_to_store = list(v) if isinstance(v, tuple) else v
-                __scalars__[key_path] = {
-                    "type": get_scalar_type_name(v),
-                    "value": val_to_store
-                }
-
-    # 3. Create JSON header
-    header = {
-        "__metadata__": __metadata__,
-        "__tensors__": __tensors__,
-        "__scalars__": __scalars__,
-        "__config__": __config__
-    }
-    
-    header_bytes = json.dumps(header).encode('utf-8')
-    
-    # 4. Align JSON header so the tensor buffer starts at an 8-byte boundary
-    padding_len = (8 - (8 + len(header_bytes)) % 8) % 8
-    header_bytes += b' ' * padding_len
-    header_len = len(header_bytes)
-
-    # 5. Write everything to disk atomically (temp file + rename), so an
-    # interrupted save never leaves a truncated/corrupt checkpoint at `path`.
-    # Ensure any parent directories exist
-    target_dir = os.path.dirname(os.path.abspath(path))
-    os.makedirs(target_dir, exist_ok=True)
-
-    temp_fd, temp_path = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
-    try:
-        with os.fdopen(temp_fd, "wb") as f:
-            f.write(struct.pack("<Q", header_len))
-            f.write(header_bytes)
-
-            import ctypes
-            for key_path, tensor in tensors_to_write:
-                t_cpu = tensor.detach().cpu().contiguous()
-                numel = t_cpu.numel()
-                elem_size = t_cpu.element_size()
-                total_bytes = numel * elem_size
-                padding_len = (8 - (total_bytes % 8)) % 8
-
-                if total_bytes > 0:
-                    # data_ptr() points at the tensor's first element (it accounts
-                    # for storage_offset); untyped_storage().data_ptr() would point
-                    # at the start of the underlying storage and serialize the
-                    # wrong bytes for contiguous views like x[1:].
-                    address = t_cpu.data_ptr()
-                    buffer = (ctypes.c_char * total_bytes).from_address(address)
-                    f.write(buffer)
-
-                if padding_len > 0:
-                    f.write(b'\x00' * padding_len)
-        os.replace(temp_path, path)
-    except BaseException:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise
+    safe_save_state(state_dict, path, metadata=metadata)
 
 
-def safe_load_optimizer(path: str) -> dict:
+def _safe_load_optimizer_v1_0(path: str) -> dict:
     """
-    Loads a PyTorch optimizer state_dict from a file securely, without code execution.
+    Loads a PyTorch optimizer state_dict from a file securely (v1.0 format), without code execution.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"No such file: {path}")
@@ -547,3 +431,390 @@ def safe_load_into_optimizer(optimizer: torch.optim.Optimizer, path: str) -> Non
 
     # Load the validated state_dict into the optimizer
     optimizer.load_state_dict(state_dict)
+
+
+def safe_save_state(state: dict, path: str, metadata: dict = None) -> None:
+    """
+    Saves any nested training state (e.g. scheduler state dict, RNG states, or 
+    optimizer states) to a file using the safe, zero-code-execution format.
+    """
+    # 1. Enforce strict type validation
+    check_safe_structure(state, allow_tensors=True, allow_ndarrays=True)
+
+    __metadata__ = {
+        "format_version": "1.1",
+        "type": "general_state"
+    }
+    if metadata is not None:
+        __metadata__.update(metadata)
+
+    __tensors__ = {}
+    tensors_to_write = []  # Elements: (key, val, "tensor" | "numpy")
+    
+    # We use a mutable state wrapper to keep track of current offset across recursive calls
+    offset_wrapper = [0]
+
+    def process(val, path_str):
+        # Convert standalone NumPy scalars to native Python types first
+        if getattr(type(val), "__module__", "") == "numpy" and type(val).__name__ != "ndarray":
+            if hasattr(val, "item"):
+                val = val.item()
+            else:
+                if "int" in type(val).__name__ or "uint" in type(val).__name__:
+                    val = int(val)
+                elif "float" in type(val).__name__:
+                    val = float(val)
+                elif "bool" in type(val).__name__:
+                    val = bool(val)
+
+        if isinstance(val, bool):
+            return val
+        elif isinstance(val, (int, float, str)) or val is None:
+            return val
+        elif type(val).__name__ == "Tensor":
+            tensor_key = f"tensor_{len(tensors_to_write)}"
+            tensors_to_write.append((tensor_key, val, "tensor"))
+            
+            numel = val.numel()
+            elem_size = val.element_size()
+            total_bytes = numel * elem_size
+            padding_len = (8 - (total_bytes % 8)) % 8
+            
+            dtype_str = TORCH_TO_SAFETA.get(val.dtype)
+            if dtype_str is None:
+                raise TypeError(f"Unsupported tensor dtype: {val.dtype} at {path_str}")
+                
+            current_offset = offset_wrapper[0]
+            __tensors__[tensor_key] = {
+                "dtype": dtype_str,
+                "shape": list(val.shape),
+                "data_offsets": [current_offset, current_offset + total_bytes]
+            }
+            offset_wrapper[0] = current_offset + total_bytes + padding_len
+            
+            return {
+                "__pytype__": "tensor",
+                "key": tensor_key
+            }
+        elif type(val).__name__ == "ndarray" or getattr(type(val), "__module__", "") == "numpy":
+            import numpy as np
+            dtype_str = str(val.dtype)
+            if dtype_str not in NUMPY_SUPPORTED_DTYPES:
+                raise TypeError(f"Unsupported numpy dtype: {dtype_str} at {path_str}")
+                
+            ndarray_key = f"ndarray_{len(tensors_to_write)}"
+            tensors_to_write.append((ndarray_key, val, "numpy"))
+            
+            val_contiguous = np.ascontiguousarray(val)
+            raw_bytes = val_contiguous.tobytes()
+            total_bytes = len(raw_bytes)
+            padding_len = (8 - (total_bytes % 8)) % 8
+            
+            current_offset = offset_wrapper[0]
+            __tensors__[ndarray_key] = {
+                "dtype": dtype_str,
+                "shape": list(val.shape),
+                "data_offsets": [current_offset, current_offset + total_bytes],
+                "backend": "numpy"
+            }
+            offset_wrapper[0] = current_offset + total_bytes + padding_len
+            
+            return {
+                "__pytype__": "ndarray",
+                "key": ndarray_key
+            }
+        elif isinstance(val, dict):
+            # Check if any key is an integer
+            has_int_keys = any(isinstance(k, int) for k in val.keys())
+            if has_int_keys:
+                return {
+                    "__pytype__": "dict_with_int_keys",
+                    "keys": [k for k in val.keys()],
+                    "value": [process(v, f"{path_str}.{k}" if path_str else str(k)) for k, v in val.items()]
+                }
+            else:
+                return {k: process(v, f"{path_str}.{k}" if path_str else str(k)) for k, v in val.items()}
+        elif isinstance(val, list):
+            return [process(x, f"{path_str}[{i}]") for i, x in enumerate(val)]
+        elif isinstance(val, tuple):
+            return {
+                "__pytype__": "tuple",
+                "value": [process(x, f"{path_str}[{i}]") for i, x in enumerate(val)]
+            }
+        else:
+            raise TypeError(f"Unsupported type in state serialization: {type(val).__name__} at {path_str}")
+
+    processed_state = process(state, "")
+
+    # 3. Create JSON header
+    header = {
+        "__metadata__": __metadata__,
+        "__tensors__": __tensors__,
+        "__scalars__": {},
+        "__config__": processed_state
+    }
+    
+    header_bytes = json.dumps(header).encode('utf-8')
+    
+    # 4. Align JSON header so the tensor buffer starts at an 8-byte boundary
+    padding_len = (8 - (8 + len(header_bytes)) % 8) % 8
+    header_bytes += b' ' * padding_len
+    header_len = len(header_bytes)
+
+    # 5. Write everything to disk atomically
+    target_dir = os.path.dirname(os.path.abspath(path))
+    os.makedirs(target_dir, exist_ok=True)
+
+    temp_fd, temp_path = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
+    try:
+        with os.fdopen(temp_fd, "wb") as f:
+            f.write(struct.pack("<Q", header_len))
+            f.write(header_bytes)
+
+            import ctypes
+            for key, val, kind in tensors_to_write:
+                if kind == "tensor":
+                    t_cpu = val.detach().cpu().contiguous()
+                    numel = t_cpu.numel()
+                    elem_size = t_cpu.element_size()
+                    total_bytes = numel * elem_size
+                    padding_len = (8 - (total_bytes % 8)) % 8
+
+                    if total_bytes > 0:
+                        address = t_cpu.data_ptr()
+                        buffer = (ctypes.c_char * total_bytes).from_address(address)
+                        f.write(buffer)
+
+                    if padding_len > 0:
+                        f.write(b'\x00' * padding_len)
+                elif kind == "numpy":
+                    import numpy as np
+                    val_contiguous = np.ascontiguousarray(val)
+                    raw_bytes = val_contiguous.tobytes()
+                    total_bytes = len(raw_bytes)
+                    padding_len = (8 - (total_bytes % 8)) % 8
+
+                    if total_bytes > 0:
+                        f.write(raw_bytes)
+
+                    if padding_len > 0:
+                        f.write(b'\x00' * padding_len)
+        os.replace(temp_path, path)
+    except BaseException:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
+
+def safe_load_state(path: str) -> dict:
+    """
+    Loads any training state dictionary from a file securely, without code execution.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No such file: {path}")
+        
+    with open(path, "rb") as f:
+        # Read header length
+        header_len_bytes = f.read(8)
+        if len(header_len_bytes) < 8:
+            raise ValueError("Invalid file format: file too short to contain header length")
+        header_len = struct.unpack("<Q", header_len_bytes)[0]
+        if header_len > 50 * 1024 * 1024:
+            raise ValueError(f"Header length ({header_len}) exceeds safety limit of 50MB")
+        
+        # Get file size
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        f.seek(8)
+        
+        if header_len + 8 > file_size:
+            raise ValueError(f"Invalid header length {header_len} (file size is {file_size})")
+            
+        # Read JSON header
+        header_bytes = f.read(header_len)
+        if len(header_bytes) < header_len:
+            raise ValueError("Invalid file: file truncated before header end")
+        
+        try:
+            header = json.loads(header_bytes.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Failed to parse JSON header: {e}")
+            
+        # Verify required keys
+        if not isinstance(header, dict):
+            raise ValueError("Invalid file: JSON header must be an object")
+        for key in ["__metadata__", "__tensors__", "__scalars__", "__config__"]:
+            if key not in header:
+                raise ValueError(f"Missing required top-level key: {key}")
+            
+        # Check for unexpected top-level keys
+        allowed_keys = {"__metadata__", "__tensors__", "__scalars__", "__config__"}
+        extra_keys = set(header.keys()) - allowed_keys
+        if extra_keys:
+            raise ValueError(f"Unexpected top-level keys in header: {extra_keys}")
+            
+        # Memory map the remaining raw buffer
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        
+        start_offset = 8 + header_len
+        tensor_data_len = file_size - start_offset
+        
+        if tensor_data_len > 0:
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
+        else:
+            mm = b""
+
+    try:
+        __tensors__ = header["__tensors__"]
+        __config__ = header["__config__"]
+        
+        # Reject overlapping data_offsets
+        occupied = []
+        for key_path, tensor_meta in __tensors__.items():
+            if not isinstance(tensor_meta, dict) or not all(
+                k in tensor_meta for k in ("dtype", "shape", "data_offsets")
+            ):
+                raise ValueError(f"Malformed tensor entry for key {key_path}")
+            offsets = tensor_meta["data_offsets"]
+            if (
+                not isinstance(offsets, list) or len(offsets) != 2
+                or not all(isinstance(o, int) and not isinstance(o, bool) for o in offsets)
+            ):
+                raise ValueError(f"Malformed data_offsets for key {key_path}: {offsets!r}")
+            if offsets[0] < offsets[1]:
+                occupied.append((offsets[0], offsets[1], key_path))
+        occupied.sort()
+        for i in range(1, len(occupied)):
+            if occupied[i][0] < occupied[i - 1][1]:
+                raise ValueError(
+                    f"Overlapping tensor data_offsets: {occupied[i - 1][2]} and {occupied[i][2]}"
+                )
+
+        # Reconstruct tensors and numpy arrays
+        loaded_objects = {}
+        for tensor_key, tensor_meta in __tensors__.items():
+            dtype_str = tensor_meta["dtype"]
+            shape = tensor_meta["shape"]
+            start, end = tensor_meta["data_offsets"]
+            backend = tensor_meta.get("backend", "torch")
+
+            if start < 0 or end < start or start_offset + end > file_size:
+                raise ValueError(f"Invalid offsets [{start}, {end}] for key {tensor_key}")
+            abs_start = start_offset + start
+            
+            numel = 1
+            for dim in shape:
+                numel *= dim
+
+            if backend == "numpy":
+                import numpy as np
+                if numel == 0:
+                    arr = np.empty(shape, dtype=dtype_str)
+                else:
+                    arr = np.frombuffer(mm, dtype=dtype_str, count=numel, offset=abs_start)
+                    arr = arr.copy()
+                    arr = arr.reshape(shape)
+                loaded_objects[tensor_key] = arr
+            else:
+                torch_dtype = SAFETA_TO_TORCH.get(dtype_str)
+                if torch_dtype is None:
+                    raise ValueError(f"Unsupported dtype in header: {dtype_str}")
+
+                if not isinstance(shape, list) or not all(
+                    isinstance(dim, int) and not isinstance(dim, bool) and dim >= 0 for dim in shape
+                ):
+                    raise ValueError(f"Invalid tensor shape {shape!r} for key {tensor_key}")
+
+                load_dtype = torch.int16 if torch_dtype == torch.bfloat16 else torch_dtype
+                elem_size = DTYPE_SIZES.get(load_dtype, 1)
+                if (end - start) != numel * elem_size:
+                    raise ValueError(
+                        f"Offset range size ({end - start} bytes) does not match expected tensor size "
+                        f"({numel} elements of size {elem_size} bytes = {numel * elem_size} bytes) for key {tensor_key}"
+                    )
+                if numel > 0 and abs_start % elem_size != 0:
+                    raise ValueError(f"Unaligned memory offset {abs_start} for dtype {dtype_str} (element size {elem_size})")
+                    
+                try:
+                    if numel == 0:
+                        tensor = torch.empty(shape, dtype=load_dtype)
+                    else:
+                        tensor = torch.frombuffer(mm, dtype=load_dtype, count=numel, offset=abs_start)
+                except RuntimeError as e:
+                    raise ValueError(f"Failed to load tensor from buffer: {e}")
+                
+                if torch_dtype == torch.bfloat16:
+                    tensor = tensor.view(torch.bfloat16)
+                    
+                tensor = tensor.reshape(shape)
+                loaded_objects[tensor_key] = tensor
+
+        def reconstruct(val):
+            if isinstance(val, dict):
+                pytype = val.get("__pytype__")
+                if pytype == "tensor":
+                    return loaded_objects[val["key"]]
+                elif pytype == "ndarray":
+                    return loaded_objects[val["key"]]
+                elif pytype == "tuple":
+                    if not isinstance(val.get("value"), list):
+                        raise TypeError(f"Malformed tuple in header: 'value' must be a list, got {type(val.get('value')).__name__}")
+                    return tuple(reconstruct(x) for x in val["value"])
+                elif pytype == "dict_with_int_keys":
+                    if not isinstance(val.get("keys"), list) or not isinstance(val.get("value"), list):
+                        raise TypeError("Malformed dict_with_int_keys in header: 'keys' and 'value' must be lists")
+                    keys = val["keys"]
+                    values = [reconstruct(v) for v in val["value"]]
+                    return dict(zip(keys, values))
+                else:
+                    return {k: reconstruct(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [reconstruct(x) for x in val]
+            else:
+                return val
+
+        state_dict = reconstruct(__config__)
+    except KeyError as e:
+        raise ValueError(f"Malformed file header: missing expected key {e}")
+    
+    return state_dict
+
+
+def safe_load_optimizer(path: str) -> dict:
+    """
+    Loads a PyTorch optimizer state_dict from a file securely, supporting both v1.0 and v1.1 formats.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No such file: {path}")
+        
+    with open(path, "rb") as f:
+        header_len_bytes = f.read(8)
+        if len(header_len_bytes) < 8:
+            raise ValueError("Invalid file format: file too short to contain header length")
+        header_len = struct.unpack("<Q", header_len_bytes)[0]
+        if header_len > 50 * 1024 * 1024:
+            raise ValueError(f"Header length ({header_len}) exceeds safety limit of 50MB")
+        
+        f.seek(8)
+        header_bytes = f.read(header_len)
+        if len(header_bytes) < header_len:
+            raise ValueError("Invalid file: file truncated before header end")
+        
+        try:
+            header = json.loads(header_bytes.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Failed to parse JSON header: {e}")
+
+    # Verify JSON header is a dict
+    if not isinstance(header, dict):
+        raise ValueError("Invalid file: JSON header must be an object")
+
+    # Peek format version
+    metadata = header.get("__metadata__", {})
+    version = metadata.get("format_version", "1.0")
+    
+    if version == "1.0":
+        return _safe_load_optimizer_v1_0(path)
+    else:
+        return safe_load_state(path)

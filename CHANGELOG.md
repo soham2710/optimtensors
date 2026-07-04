@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-07-05
+
+### Added
+- **General-Purpose State Serialization (`safe_save_state`/`safe_load_state`):** Safe, zero-code-execution serialization for LR schedulers, random number generator (RNG) states (Python, NumPy, PyTorch CPU/CUDA), and arbitrary nested dictionary structures.
+- **Explicit Type-Tagging Schema:** Added a recursive serialization tag system to guarantee that `tuple` objects, integer dictionary keys, and `np.ndarray` shapes and dtypes are fully and identically restored on load (preventing list coercion and key type corruption).
+- **Contiguous NumPy Array Storage:** Serializes NumPy arrays as raw binary bytes written to the aligned raw buffer, avoiding JSON list representation inflation.
+- **Standalone NumPy Scalar Conversion:** Bare NumPy scalars (e.g. `np.int64`, `np.bool_`) sitting alone are automatically cast to their Python native primitive counterparts on save.
+- **Closed list of supported NumPy dtypes:** Validates dtypes against a closed whitelist (int8–64, uint8–64, float16–64, bool) to raise `TypeError` early on unsupported array structures.
+
+### Refactored
+- **Unified Serialization Core:** Rebuilt `safe_save_optimizer`/`safe_load_optimizer` to wrapper-call the new generalized state serialization. `safe_load_optimizer` retains 100% backward-compatibility for reading older v1.0 format checkpoints.
+- **Unified Crash Safety:** Unified atomic-write behavior (temp file + rename) for all save pathways.
+
 ## [1.0.1] - 2026-07-04
 
 ### Fixed

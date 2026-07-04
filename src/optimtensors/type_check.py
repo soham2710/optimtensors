@@ -1,4 +1,4 @@
-def check_safe_structure(val, path=""):
+def check_safe_structure(val, path="", allow_tensors=False, allow_ndarrays=False):
     """
     Recursively validates that the structure only contains allowed safe primitive types:
     int, float, bool, str, None, and lists/tuples/dicts of these.
@@ -11,6 +11,10 @@ def check_safe_structure(val, path=""):
         return
     elif isinstance(val, (int, float, str)) or val is None:
         return
+    elif allow_tensors and type(val).__name__ == "Tensor":
+        return
+    elif allow_ndarrays and (type(val).__name__ == "ndarray" or getattr(type(val), "__module__", "") == "numpy"):
+        return
     elif isinstance(val, dict):
         for k, v in val.items():
             if not isinstance(k, (str, int)):
@@ -18,15 +22,20 @@ def check_safe_structure(val, path=""):
                     f"Keys must be strings or integers, got {type(k).__name__} at {path}"
                 )
             sub_path = f"{path}.{k}" if path else str(k)
-            check_safe_structure(v, sub_path)
+            check_safe_structure(v, sub_path, allow_tensors, allow_ndarrays)
     elif isinstance(val, (list, tuple)):
         for i, item in enumerate(val):
             sub_path = f"{path}[{i}]"
-            check_safe_structure(item, sub_path)
+            check_safe_structure(item, sub_path, allow_tensors, allow_ndarrays)
     else:
+        allowed_msg = "Only int, float, bool, str, None, and lists/tuples/dicts of these are allowed."
+        if allow_tensors or allow_ndarrays:
+            allowed_msg = (
+                "Only int, float, bool, str, None, lists/tuples/dicts of these, "
+                f"and {'tensors' if allow_tensors else ''}{' and ' if allow_tensors and allow_ndarrays else ''}{'ndarrays' if allow_ndarrays else ''} are allowed."
+            )
         raise TypeError(
-            f"Unsupported type {type(val).__name__} at '{path}'. "
-            f"Only int, float, bool, str, None, and lists/tuples/dicts of these are allowed."
+            f"Unsupported type {type(val).__name__} at '{path}'. {allowed_msg}"
         )
 
 
