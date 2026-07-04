@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, dcp-integration]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-core:
+    name: core / Python ${{ matrix.python-version }} / CPU
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install torch (CPU)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package
+        run: pip install -e .[dev]
+
+      - name: Run core tests
+        # Ignore test_dcp.py and other distributed tests in core single-process matrix
+        run: pytest tests/ -v --ignore=tests/test_dcp.py --ignore=tests/test_dcp_architectures.py --ignore=tests/test_fsdp_cpu.py
+
+  test-distributed:
+    name: distributed / Python 3.12 / CPU
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install torch (CPU)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package
+        run: pip install -e .[dev]
+
+      - name: Run distributed tests
+        run: |
+          if [ -f tests/test_dcp.py ]; then
+            pytest tests/test_dcp.py -v
+          fi
+          if [ -f tests/test_dcp_architectures.py ]; then
+            pytest tests/test_dcp_architectures.py -v
+          fi
